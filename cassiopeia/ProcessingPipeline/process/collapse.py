@@ -51,7 +51,7 @@ def call_consensus(als, max_read_length):
     shape = statistics['c'].shape
 
     rl_range = np.arange(max_read_length)
-    
+
     fields = [
         ('c_above_min_q', int),
         ('c', int),
@@ -64,15 +64,15 @@ def call_consensus(als, max_read_length):
 
     argsorted = stat_tuples.argsort()
     second_best_idxs, best_idxs = argsorted[:, -2:].T
-    
+
     best_stats = stat_tuples[rl_range, best_idxs]
 
     majority = (best_stats['c'] / len(als)) > 0.5
     at_least_one_hq = best_stats['c_above_min_q'] > 0
-    
+
     qs = np.full(max_read_length, LOW_Q, dtype=int)
     qs[majority & at_least_one_hq] = HIGH_Q
-    
+
     ties = (best_stats == stat_tuples[rl_range, second_best_idxs])
 
     best_idxs[ties] = utilities.base_to_index['N']
@@ -89,26 +89,26 @@ def within_radius_of_seed(seed, als, max_hq_mismatches):
     seed_b = seed.encode()
     ds = [hq_mismatches_from_seed(seed_b, al.query_sequence.encode(), al.query_qualities, 20)
           for al in als]
-    
+
     near_seed = []
     remaining = []
-    
+
     for i, (d, al) in enumerate(zip(ds, als)):
         if d <= max_hq_mismatches:
             near_seed.append(al)
         else:
             remaining.append(al)
-    
+
     return near_seed, remaining
 
 def propose_seed(als, max_read_length):
     seq, count = Counter(al.query_sequence for al in als).most_common(1)[0]
-    
+
     if count > 1:
         seed = seq
     else:
         seed = call_consensus(als, max_read_length).query_sequence
-        
+
     return seed
 
 def make_singleton_cluster(al):
@@ -121,31 +121,31 @@ def make_singleton_cluster(al):
 def form_clusters(als, max_read_length, max_hq_mismatches):
     if len(als) == 0:
         clusters = []
-    
+
     elif len(als) == 1:
         clusters = [make_singleton_cluster(al) for al in als]
-    
+
     else:
         seed = propose_seed(als, max_read_length)
         near_seed, remaining = within_radius_of_seed(seed, als, max_hq_mismatches)
-        
+
         if len(near_seed) == 0:
             # didn't make progress, so give up
             clusters = [make_singleton_cluster(al) for al in als]
-        
+
         else:
             clusters = [call_consensus(near_seed, max_read_length)] + form_clusters(remaining, max_read_length, max_hq_mismatches)
-            
+
     return clusters
 
 def align_clusters(first, second):
     al = sw.global_alignment(first.query_sequence, second.query_sequence)
-    
+
     num_hq_mismatches = 0
     for q_i, t_i in al['mismatches']:
         if (first.query_qualities[q_i] > 20) and (second.query_qualities[t_i] > 20):
             num_hq_mismatches += 1
-            
+
     return al['XO'], num_hq_mismatches
 
 cell_key = lambda al: al.get_tag(CELL_BC_TAG)
@@ -156,7 +156,7 @@ empty_header = pysam.AlignmentHeader()
 def sort_cellranger_bam(bam_fn, sorted_fn, sort_key, filter_func, show_progress=False):
     Path(sorted_fn).parent.mkdir(exist_ok=True)
 
-    bam_fh = pysam.AlignmentFile(str(bam_fn))
+    bam_fh = pysam.AlignmentFile(str(bam_fn), check_sq=False)
 
     als = bam_fh
 
@@ -164,14 +164,14 @@ def sort_cellranger_bam(bam_fn, sorted_fn, sort_key, filter_func, show_progress=
 
     max_read_length = 0
     total_reads_out = 0
-    
+
     chunk_fns = []
-        
+
     for i, chunk in enumerate(utilities.chunks(relevant, 10000000)):
         suffix = '.{:06d}.bam'.format(i)
         chunk_fn = Path(sorted_fn).with_suffix(suffix)
         sorted_chunk = sorted(chunk, key=sort_key)
-    
+
         with pysam.AlignmentFile(str(chunk_fn), 'wb', template=bam_fh) as fh:
             for al in sorted_chunk:
                 max_read_length = max(max_read_length, al.query_length)
@@ -196,7 +196,7 @@ def sort_cellranger_bam(bam_fn, sorted_fn, sort_key, filter_func, show_progress=
 
     for fn in chunk_fns:
         fn.unlink()
-    
+
     yaml_fn = Path(sorted_fn).with_suffix('.yaml')
     stats = {
         'total_reads': total_reads_out,
@@ -256,7 +256,7 @@ def error_correct_UMIs(cell_group, sampleID, max_UMI_distance=1):
 
 
     for al in cell_group:
-        
+
         # add alignments not touched during error correction back into the group to be written to file
         if al.get_tag(UMI_TAG) not in corrected_names:
             corrected_group.append(al)
@@ -292,9 +292,9 @@ def form_collapsed_clusters(sorted_fn,
     sorted_als = pysam.AlignmentFile(str(sorted_fn), check_sq=False)
     if progress:
         sorted_als = progress(sorted_als, total=total_reads, desc='Collapsing')
-    
+
     cell_groups = utilities.group_by(sorted_als, cell_key)
-    
+
     with pysam.AlignmentFile(str(collapsed_fn), 'wb', header=empty_header) as collapsed_fh:
         for cell_BC, cell_group in cell_groups:
 
@@ -322,7 +322,7 @@ def form_collapsed_clusters(sorted_fn,
                             biggest = merge_annotated_clusters(biggest, other)
                         else:
                             not_collapsed.append(other)
-                
+
                 for cluster in [biggest] + not_collapsed:
                     annotation = cluster_Annotation(cell_BC=cluster.get_tag(CELL_BC_TAG),
                                                     UMI=cluster.get_tag(UMI_TAG),
@@ -337,17 +337,17 @@ def form_collapsed_clusters(sorted_fn,
 def error_correct_allUMIs(sorted_fn,
                             max_UMI_distance,
                             sampleID,
-                            log_fh = None, 
+                            log_fh = None,
                             show_progress=True):
 
     collapsed_fn = sorted_fn.with_name(sorted_fn.stem + '_ec.bam')
     log_fn = sorted_fn.with_name(sorted_fn.stem + '_umi_ec_log.txt')
-    
+
     sorted_als = pysam.AlignmentFile(str(sorted_fn), check_sq=False)
 
     # group_by only works if sorted_als is already sorted by loc_key
     allele_groups = utilities.group_by(sorted_als, loc_key)
-    
+
     num_corrected = 0
     total = 0
 
@@ -423,7 +423,7 @@ def make_sample_sheet(group_dir, target, guides):
 
 def make_cluster_fastqs(collapsed_fn, target, gemgroup, notebook=True):
     group_dir = Path(collapsed_fn).parent
-    df = pd.read_csv('/home/jah/projects/britt/data/cell_identities.csv', index_col='cell_barcode') 
+    df = pd.read_csv('/home/jah/projects/britt/data/cell_identities.csv', index_col='cell_barcode')
     cell_BC_to_guide = df['guide_identity']
     guides = split_into_guide_fastqs(collapsed_fn, cell_BC_to_guide, gemgroup, group_dir)
     make_sample_sheet(group_dir, target, guides)
@@ -459,7 +459,7 @@ def main():
 
         parallel_command = [
             'parallel',
-            '-n', '1', 
+            '-n', '1',
             '--verbose',
             '--max-procs', max_procs,
             './collapse.py',
@@ -485,7 +485,7 @@ def main():
 
         parallel_command = [
             'parallel',
-            '-n', '1', 
+            '-n', '1',
             '--verbose',
             '--max-procs', max_procs,
             './collapse.py',
@@ -508,7 +508,7 @@ def main():
         max_hq_mismatches = info.get('max_hq_mismatches', 10)
         max_indels = info.get('max_indels', 2)
         max_UMI_distance = info.get('max_UMI_distance', 1)
-        
+
         show_progress = not args.no_progress
 
         input_fn = info['bam_file']
@@ -526,7 +526,7 @@ def main():
                                 max_UMI_distance,
                                 show_progress=show_progress
                                )
-            
+
         #make_cluster_fastqs(collapsed_fn, target, gemgroup)
 
     elif args.correct is not None:
@@ -555,7 +555,7 @@ def main():
         #if not sorted_fn.exists() or args.force_sort:
         sort_cellranger_bam(input_fn, sorted_fn, sort_key, filter_func, show_progress = show_progress)
 
-        error_correct_allUMIs(sorted_fn, 
+        error_correct_allUMIs(sorted_fn,
                               max_UMI_distance,
-                              info.get("id"), 
+                              info.get("id"),
                             show_progress = show_progress)
